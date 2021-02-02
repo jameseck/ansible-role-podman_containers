@@ -1,0 +1,73 @@
+---
+# We register a variable here because we want to capture whether the dirs have changed
+- name: Create container data/config dirs on host
+  file: "{{ item.1 }}"
+  loop: "{{ podman_containers | subelements('host_dirs') }}"
+  register: __create_container_dirs
+  when: item.0.host_dirs is defined
+
+# We register a variable here because we want to capture whether the template files have changed
+- name: Deploy container templates
+  template:
+    src: "{{ item.1.src }}"
+    dest: "{{ item.1.dest }}"
+    owner: "{{ item.1.owner | default('root') }}"
+    group: "{{ item.1.group | default('root') }}"
+    mode: "{{ item.1.mode | default('0600') }}"
+  with_subelements:
+  - "{{ podman_containers }}"
+  - container_templates
+  - skip_missing: yes
+  register: __deploy_container_templates
+
+- name: set internal fact
+  set_fact:
+    __container_restart_needed: []
+
+- name: Build a list of container names that have changed files or dirs
+  set_fact:
+    __container_restart_needed_pre: "{{ __container_restart_needed + [item.item.0.name] }}"
+  loop: "{{ __create_container_dirs.results + __deploy_container_templates.results }}"
+  loop_control:
+    label: "{{ item.item.0.name }}"
+  when:
+  - item.changed
+  - item.item.0.name not in __container_restart_needed
+
+- name: List of containers that need a restart
+  debug:
+    var: __container_restart_needed
+
+- name: Create container systemd units
+  template:
+    dest: "/etc/systemd/system/container-{{ item.name }}.service"
+    src: container-systemd.j2
+    owner: root
+    group: root
+    mode: 0644
+  diff: no # to hide sensitive passwords etc
+  loop: "{{ podman_containers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: __container_systemd_units
+  notify: systemd-daemon-reload
+
+- meta: flush_handlers
+
+- name: Ensure containers are started
+  service:
+    name: "container-{{ item.name }}"
+    enabled: yes
+    state: started
+  loop: "{{ podman_containers | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Restart containers that need it
+  service:
+    name: "container-{{ item.item.name }}"
+    state: restarted
+  when: item.item.name in __container_restart_needed or item.changed
+  loop: "{{ __container_systemd_units.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"

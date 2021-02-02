@@ -1,0 +1,33 @@
+[Unit]
+Description=container-{{ item.name }}
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Restart=on-failure
+ExecStartPre=-/bin/sh -c "/usr/bin/podman image exists {{ item.image }}:{{ item.image_tag }} || /usr/bin/podman pull {{ item.image }}:{{ item.image_tag }}"
+ExecStartPre=-/usr/bin/podman rm -f {{ item.name }}
+ExecStart=/usr/bin/podman run \
+    --name {{ item.name }} \
+    --replace \
+    --tty \
+{% for param in item.params %}
+    {{ param }} \
+{% endfor %}
+{% for vol in item.volumes %}
+    -v {{ vol }} \
+{% endfor %}
+    {{ item.image }}:{{ item.image_tag }} {{ " \\" if 'args' in item }}
+{% if 'args' in item %}
+{% for arg in item.args %}
+    {{ arg }} {{ " \\" if not loop.last }}
+{% endfor %}
+{% endif %}
+
+
+ExecStop=/usr/bin/podman rm -f {{ item.name }}
+KillMode=none
+PIDFile=/run/{{ item.name }}.pid
+
+[Install]
+WantedBy=multi-user.target
