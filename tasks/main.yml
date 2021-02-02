@@ -25,7 +25,7 @@
     __container_restart_needed: []
 
 - name: Build a list of container names that have changed files or dirs
-  set_fact:
+  set_fact:  # noqa 503
     __container_restart_needed_pre: "{{ __container_restart_needed + [item.item.0.name] }}"
   loop: "{{ __create_container_dirs.results + __deploy_container_templates.results }}"
   loop_control:
@@ -64,7 +64,7 @@
     label: "{{ item.name }}"
 
 - name: Restart containers that need it
-  service:
+  service:  # noqa 503
     name: "container-{{ item.item.name }}"
     state: restarted
   when: item.item.name in __container_restart_needed or item.changed
